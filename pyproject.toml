@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Depth and normal maps from Meta's SAM 3D Objects geometry model"
 requires-python = ">=3.12"
 dependencies = [
-    "sam3d-objects @ git+https://github.com/facebookresearch/sam-3d-objects.git",
+    # Fork with cleaned requirements.txt (removes unused peft==0.10.0
+    # and ~50 other phantom deps that conflict with Scope).
+    # See: https://github.com/hthillman/sam3d-objects/tree/clean-dependencies
+    "sam3d-objects @ git+https://github.com/hthillman/sam3d-objects.git@clean-dependencies",
     "gsplat",
     "kaolin",
 ]
