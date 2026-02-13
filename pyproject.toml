@@ -15,6 +15,9 @@ dependencies = [
 [project.entry-points."scope"]
 scope_sam3d = "scope_sam3d"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
