@@ -1,45 +1,48 @@
+from typing import ClassVar, Literal
+
 from pydantic import Field
 
-from scope.core.pipelines.base_schema import BasePipelineConfig, ModeDefaults, ui_field_config
+from scope.core.pipelines.base_schema import (
+    BasePipelineConfig,
+    ModeDefaults,
+    UsageType,
+    ui_field_config,
+)
 
 
 class SAM3DConfig(BasePipelineConfig):
     """Configuration for SAM 3D depth/normal pipeline."""
 
-    pipeline_id = "sam3d-depth"
-    pipeline_name = "SAM 3D Depth"
-    pipeline_description = (
+    pipeline_id: ClassVar[str] = "sam3d-depth"
+    pipeline_name: ClassVar[str] = "SAM 3D Depth"
+    pipeline_description: ClassVar[str] = (
         "Extract depth maps and surface normals from video using "
         "Meta's SAM 3D Objects geometry model"
     )
 
-    supports_prompts = False
-    estimated_vram_gb = 9.0
+    supports_prompts: ClassVar[bool] = False
+    modified: ClassVar[bool] = True
+    usage: ClassVar[list[UsageType]] = [UsageType.GENERATOR]
+    estimated_vram_gb: ClassVar[float | None] = 9.0
 
-    modes = {"video": ModeDefaults(default=True)}
+    modes: ClassVar[dict[str, ModeDefaults]] = {
+        "video": ModeDefaults(default=True),
+    }
 
     # --- Output Mode ---
 
-    output_mode: str = Field(
+    output_mode: Literal["depth", "normals", "both"] = Field(
         default="depth",
         description="What to render: depth map, normal map, or both side-by-side",
-        json_schema_extra=ui_field_config(
-            order=1,
-            label="Output",
-            options=["depth", "normals", "both"],
-        ),
+        json_schema_extra=ui_field_config(order=1, label="Output"),
     )
 
     # --- Depth Visualization ---
 
-    depth_colormap: str = Field(
+    depth_colormap: Literal["magma", "viridis", "plasma", "grayscale"] = Field(
         default="magma",
         description="Colormap for depth visualization",
-        json_schema_extra=ui_field_config(
-            order=10,
-            label="Depth Colormap",
-            options=["magma", "viridis", "plasma", "grayscale"],
-        ),
+        json_schema_extra=ui_field_config(order=10, label="Depth Colormap"),
     )
 
     depth_invert: bool = Field(
@@ -52,18 +55,14 @@ class SAM3DConfig(BasePipelineConfig):
 
     # --- Normal Map ---
 
-    normal_space: str = Field(
+    normal_space: Literal["camera", "world"] = Field(
         default="camera",
         description=(
             "Coordinate space for normal map rendering. "
             "Camera space is more useful for relighting; "
             "world space preserves object orientation."
         ),
-        json_schema_extra=ui_field_config(
-            order=20,
-            label="Normal Space",
-            options=["camera", "world"],
-        ),
+        json_schema_extra=ui_field_config(order=20, label="Normal Space"),
     )
 
     # --- Overlay ---
