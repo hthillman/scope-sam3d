@@ -22,7 +22,7 @@ class SAM3DConfig(BasePipelineConfig):
 
     supports_prompts: ClassVar[bool] = False
     modified: ClassVar[bool] = True
-    usage: ClassVar[list[UsageType]] = [UsageType.GENERATOR]
+    usage: ClassVar[list[UsageType]] = [UsageType.PREPROCESSOR]
     estimated_vram_gb: ClassVar[float | None] = 9.0
 
     modes: ClassVar[dict[str, ModeDefaults]] = {
