@@ -21,6 +21,9 @@ from pathlib import Path
 
 import torch
 
+# Surface Hydra's chained exceptions so we see the real import error
+os.environ["HYDRA_FULL_ERROR"] = "1"
+
 logger = logging.getLogger(__name__)
 
 # HuggingFace repo for SAM 3D Objects
