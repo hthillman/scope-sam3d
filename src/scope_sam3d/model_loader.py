@@ -1,4 +1,4 @@
-"""Load SAM 3D Objects geometry pipeline (sparse structure stage only).
+"""Load SAM 3D Objects geometry pipeline.
 
 The full SAM 3D pipeline has two stages:
   1. Sparse Structure Generation (ss_generator + ss_decoder) — 3D occupancy
@@ -65,6 +65,27 @@ def _find_or_download_checkpoint(cache_dir: Path | None = None) -> Path:
     return Path(local_dir)
 
 
+def _find_config(checkpoint_dir: Path) -> Path:
+    """Locate pipeline.yaml in the downloaded checkpoint directory.
+
+    The HuggingFace repo has it at checkpoints/pipeline.yaml.
+    """
+    candidates = [
+        checkpoint_dir / "checkpoints" / "pipeline.yaml",
+        checkpoint_dir / "pipeline.yaml",
+        checkpoint_dir / "checkpoints" / "hf" / "pipeline.yaml",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+
+    raise FileNotFoundError(
+        f"Could not find pipeline.yaml in {checkpoint_dir}. "
+        f"Searched: {[str(c) for c in candidates]}. "
+        "The SAM 3D checkpoint may be incomplete."
+    )
+
+
 def load_sam3d_pipeline(
     device: torch.device,
     num_inference_steps: int = 12,
@@ -98,23 +119,20 @@ def load_sam3d_pipeline(
             "They should be installed with the sam3d-objects package."
         ) from exc
 
-    config_path = checkpoint_dir / "pipeline.yaml"
-    if not config_path.exists():
-        # Try the checkpoints/hf subdirectory pattern
-        alt_path = checkpoint_dir / "checkpoints" / "hf" / "pipeline.yaml"
-        if alt_path.exists():
-            config_path = alt_path
-        else:
-            raise FileNotFoundError(
-                f"Could not find pipeline.yaml in {checkpoint_dir}. "
-                "The SAM 3D checkpoint may be incomplete."
-            )
+    config_path = _find_config(checkpoint_dir)
+    logger.info("Using config: %s", config_path)
 
     config = OmegaConf.load(str(config_path))
+
+    # workspace_dir must point to the directory containing pipeline.yaml;
+    # all model weight paths in the config are resolved relative to this.
     config.workspace_dir = str(config_path.parent)
 
+    # Match the reference Inference class settings
+    config.rendering_engine = "pytorch3d"
+    config.compile_model = False
+
     pipeline = instantiate(config)
-    pipeline.to(device)
 
     logger.info("SAM 3D pipeline loaded successfully on %s", device)
 
@@ -147,12 +165,14 @@ class SAM3DInferenceWrapper:
         self,
         image: torch.Tensor,
         mask: torch.Tensor,
+        seed: int | None = None,
     ) -> dict:
         """Run SAM 3D geometry inference.
 
         Args:
             image: RGB image tensor (H, W, 3) in [0, 1] range, float32.
             mask: Binary mask tensor (H, W) in {0, 1}, float32.
+            seed: Optional random seed for reproducibility.
 
         Returns:
             dict with keys:
@@ -164,32 +184,42 @@ class SAM3DInferenceWrapper:
         """
         import numpy as np
 
-        # Convert to RGBA uint8 numpy array (SAM 3D's expected input)
+        # Convert to RGBA uint8 numpy array (SAM 3D's expected input format)
         img_np = (image.cpu().numpy() * 255).astype(np.uint8)
         mask_np = (mask.cpu().numpy() * 255).astype(np.uint8)
         rgba = np.concatenate(
-            [img_np, mask_np[..., None]], axis=-1
+            [img_np[..., :3], mask_np[..., None]], axis=-1
         )  # (H, W, 4)
 
-        # Run pipeline — the sam3d_objects pipeline handles depth
-        # estimation (MoGe) internally, then runs the diffusion stages.
-        output = self.pipeline(
+        # Run pipeline using the .run() API (matches notebook/inference.py)
+        output = self.pipeline.run(
             rgba,
-            num_inference_steps=self.num_inference_steps,
+            None,  # masks — handled internally
+            seed,
+            stage1_only=False,
+            with_mesh_postprocess=False,
+            with_texture_baking=False,
+            with_layout_postprocess=False,
+            use_vertex_color=True,
+            stage1_inference_steps=None,
         )
 
-        # Extract geometry from pipeline output
-        gs = output.get("gs") or output.get("gaussian")
-        if gs is None and "gaussian" in output:
-            gs = output["gaussian"]
-            if isinstance(gs, list):
+        # Extract Gaussian geometry from pipeline output
+        gs = output.get("gs")
+        if gs is None:
+            gs = output.get("gaussian")
+            if isinstance(gs, list) and len(gs) > 0:
                 gs = gs[0]
+
+        # Layout info (rotation, translation, scale) is in the output
+        # directly or nested under a "layout" key
+        layout = output.get("layout", {})
 
         result = {
             "gaussians": gs,
-            "rotation": output.get("rotation"),
-            "translation": output.get("translation"),
-            "scale": output.get("scale"),
+            "rotation": output.get("rotation") or layout.get("rotation"),
+            "translation": output.get("translation") or layout.get("translation"),
+            "scale": output.get("scale") or layout.get("scale"),
         }
 
         return result
