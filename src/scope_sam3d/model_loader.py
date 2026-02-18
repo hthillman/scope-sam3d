@@ -135,6 +135,19 @@ def load_sam3d_pipeline(
     config.rendering_engine = "pytorch3d"
     config.compile_model = False
 
+    # Try to import the target class directly first to get a clear error
+    # if something in the import chain fails (Hydra swallows the real cause)
+    try:
+        from sam3d_objects.pipeline.inference_pipeline_pointmap import InferencePipelinePointMap  # noqa: F401
+        logger.info("Successfully imported InferencePipelinePointMap")
+    except Exception:
+        import traceback
+        logger.error(
+            "Failed to import InferencePipelinePointMap. Full traceback:\n%s",
+            traceback.format_exc(),
+        )
+        raise
+
     pipeline = instantiate(config)
 
     logger.info("SAM 3D pipeline loaded successfully on %s", device)
