@@ -9,6 +9,7 @@ dependencies = [
     # See: https://github.com/hthillman/sam3d-objects/tree/clean-dependencies
     "sam3d-objects @ git+https://github.com/hthillman/sam3d-objects.git@clean-dependencies",
     "gsplat",
+    "setuptools",  # lightning needs pkg_resources
 ]
 
 [project.entry-points."scope"]
