@@ -88,23 +88,21 @@ def _find_config(checkpoint_dir: Path) -> Path:
 
 def load_sam3d_pipeline(
     device: torch.device,
-    num_inference_steps: int = 12,
     cache_dir: Path | None = None,
 ) -> SAM3DInferenceWrapper:
     """Load the SAM 3D Objects inference pipeline.
 
     This loads the full pipeline from the sam3d_objects package, using
     Hydra/OmegaConf config to instantiate all model components. We then
-    wrap it in a thin interface that accepts (image, mask) and returns
-    Gaussian geometry for rendering.
+    wrap it in a thin interface that exposes `compute_pointmap(image, mask)`
+    for fast monocular depth estimation.
 
     Args:
         device: Torch device (cuda recommended).
-        num_inference_steps: Diffusion steps for geometry generation.
         cache_dir: Where to cache downloaded weights.
 
     Returns:
-        A SAM3DInferenceWrapper with a __call__(image, mask) interface.
+        A SAM3DInferenceWrapper with compute_pointmap(image, mask).
     """
     checkpoint_dir = _find_or_download_checkpoint(cache_dir)
 
@@ -149,11 +147,7 @@ def load_sam3d_pipeline(
 
     logger.info("SAM 3D pipeline loaded successfully on %s", device)
 
-    return SAM3DInferenceWrapper(
-        pipeline=pipeline,
-        device=device,
-        num_inference_steps=num_inference_steps,
-    )
+    return SAM3DInferenceWrapper(pipeline=pipeline, device=device)
 
 
 class SAM3DInferenceWrapper:
@@ -163,15 +157,9 @@ class SAM3DInferenceWrapper:
     stage, and returns Gaussian splat parameters + layout for rendering.
     """
 
-    def __init__(
-        self,
-        pipeline: object,
-        device: torch.device,
-        num_inference_steps: int = 12,
-    ):
+    def __init__(self, pipeline: object, device: torch.device):
         self.pipeline = pipeline
         self.device = device
-        self.num_inference_steps = num_inference_steps
 
     def _to_rgba(
         self, image: torch.Tensor, mask: torch.Tensor

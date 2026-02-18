@@ -105,19 +105,3 @@ class SAM3DConfig(BasePipelineConfig):
         ),
         json_schema_extra=ui_field_config(order=41, label="Temporal Smoothing"),
     )
-
-    num_inference_steps: int = Field(
-        default=12,
-        ge=1,
-        le=50,
-        description=(
-            "Number of diffusion steps for geometry generation. "
-            "Fewer steps = faster but lower quality. "
-            "Changing this requires a pipeline reload."
-        ),
-        json_schema_extra=ui_field_config(
-            order=42,
-            label="Diffusion Steps",
-            is_load_param=True,
-        ),
-    )

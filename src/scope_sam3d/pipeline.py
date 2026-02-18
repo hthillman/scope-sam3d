@@ -41,12 +41,8 @@ class SAM3DPipeline(Pipeline):
 
         # Load-time params
         resolution = kwargs.get("inference_resolution", 512)
-        num_steps = kwargs.get("num_inference_steps", 12)
 
-        self.model = load_sam3d_pipeline(
-            device=self.device,
-            num_inference_steps=num_steps,
-        )
+        self.model = load_sam3d_pipeline(device=self.device)
         self._inference_resolution = resolution
 
     def prepare(self, **kwargs) -> Requirements:
