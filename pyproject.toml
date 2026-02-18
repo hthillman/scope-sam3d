@@ -9,7 +9,6 @@ dependencies = [
     # See: https://github.com/hthillman/sam3d-objects/tree/clean-dependencies
     "sam3d-objects @ git+https://github.com/hthillman/sam3d-objects.git@clean-dependencies",
     "gsplat",
-    "kaolin",
 ]
 
 [project.entry-points."scope"]
