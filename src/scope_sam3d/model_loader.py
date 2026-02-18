@@ -231,11 +231,15 @@ class SAM3DInferenceWrapper:
         # directly or nested under a "layout" key
         layout = output.get("layout", {})
 
+        def _pick(key):
+            v = output.get(key)
+            return v if v is not None else layout.get(key)
+
         result = {
             "gaussians": gs,
-            "rotation": output.get("rotation") or layout.get("rotation"),
-            "translation": output.get("translation") or layout.get("translation"),
-            "scale": output.get("scale") or layout.get("scale"),
+            "rotation": _pick("rotation"),
+            "translation": _pick("translation"),
+            "scale": _pick("scale"),
         }
 
         return result
