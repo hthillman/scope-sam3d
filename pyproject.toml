@@ -7,7 +7,7 @@ dependencies = [
     # Fork with cleaned requirements.txt (removes unused peft==0.10.0
     # and ~50 other phantom deps that conflict with Scope).
     # See: https://github.com/hthillman/sam3d-objects/tree/clean-dependencies
-    "sam3d-objects @ git+https://github.com/hthillman/sam3d-objects.git@clean-dependencies",
+    "sam3d-objects @ git+https://github.com/hthillman/sam3d-objects.git",
     "gsplat",
     "setuptools",  # lightning needs pkg_resources
 ]
