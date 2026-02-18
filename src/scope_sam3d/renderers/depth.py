@@ -211,6 +211,58 @@ def _fill_holes(
     return result
 
 
+def render_depth_from_pointmap(
+    pointmap: torch.Tensor,
+    output_size: tuple[int, int],
+    device: torch.device,
+    colormap: str = "magma",
+    invert: bool = False,
+) -> torch.Tensor:
+    """Render a colormapped depth map directly from a 3D pointmap.
+
+    Extracts depth from the Z channel, normalizes to [0, 1], and applies
+    a colormap. Much faster than the Gaussian splatting path.
+
+    Args:
+        pointmap: (3, H, W) XYZ coordinates in camera space.
+        output_size: (H, W) to resize the output to.
+        device: Torch device.
+        colormap: One of "magma", "viridis", "plasma", "grayscale".
+        invert: If True, near=dark and far=bright.
+
+    Returns:
+        (H, W, 3) float32 tensor in [0, 1] range.
+    """
+    depth = pointmap[2].to(device)  # (H_pm, W_pm)
+
+    # Normalize to [0, 1] using only valid (non-zero) regions
+    valid = depth.abs() > 1e-6
+    if valid.any():
+        d_min = depth[valid].min()
+        d_max = depth[valid].max()
+        d_range = (d_max - d_min).clamp(min=1e-6)
+        depth = ((depth - d_min) / d_range).clamp(0, 1)
+        depth[~valid] = 0.0
+
+    if invert:
+        depth = 1.0 - depth
+
+    # Resize to target resolution
+    H, W = output_size
+    if depth.shape[0] != H or depth.shape[1] != W:
+        depth = torch.nn.functional.interpolate(
+            depth.unsqueeze(0).unsqueeze(0),
+            size=(H, W),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0).squeeze(0)
+
+    # Apply colormap
+    cm = _get_colormap(colormap, device)
+    indices = (depth.clamp(0, 1) * 255).long().clamp(0, 255)
+    return cm[indices]  # (H, W, 3)
+
+
 def render_depth_map(
     gaussians: object,
     layout: dict,

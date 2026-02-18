@@ -1,12 +1,9 @@
 """Load SAM 3D Objects geometry pipeline.
 
-The full SAM 3D pipeline has two stages:
-  1. Sparse Structure Generation (ss_generator + ss_decoder) — 3D occupancy
-  2. Dense Geometry Generation (slat_generator + decoders) — Gaussians/mesh
-
-For depth and normal maps we need both stages: stage 1 gives us the coarse
-voxel structure, and stage 2 gives us dense Gaussians from which we can
-render high-quality depth and normals.
+Uses MoGe (monocular depth estimation) from the SAM 3D pipeline to
+produce per-pixel 3D pointmaps. Depth and surface normals are derived
+directly from the pointmap, bypassing the expensive two-stage diffusion
+generative process.
 
 Model weights are gated on HuggingFace. The user must:
   1. Accept the SAM License at https://huggingface.co/facebook/sam-3d-objects
@@ -176,72 +173,37 @@ class SAM3DInferenceWrapper:
         self.device = device
         self.num_inference_steps = num_inference_steps
 
+    def _to_rgba(
+        self, image: torch.Tensor, mask: torch.Tensor
+    ):
+        """Convert (H,W,3) float [0,1] image + (H,W) mask to RGBA uint8 numpy."""
+        import numpy as np
+
+        img_np = (image.cpu().numpy() * 255).astype(np.uint8)
+        mask_np = (mask.cpu().numpy() * 255).astype(np.uint8)
+        return np.concatenate(
+            [img_np[..., :3], mask_np[..., None]], axis=-1
+        )  # (H, W, 4)
+
     @torch.no_grad()
-    def __call__(
+    def compute_pointmap(
         self,
         image: torch.Tensor,
         mask: torch.Tensor,
-        seed: int | None = None,
-    ) -> dict:
-        """Run SAM 3D geometry inference.
+    ) -> torch.Tensor:
+        """Run only the MoGe depth model to get a 3D pointmap.
+
+        This bypasses the two expensive diffusion stages and returns
+        the raw pointmap from the monocular depth estimator. A single
+        forward pass; ~15-30x faster than the full pipeline.
 
         Args:
             image: RGB image tensor (H, W, 3) in [0, 1] range, float32.
             mask: Binary mask tensor (H, W) in {0, 1}, float32.
-            seed: Optional random seed for reproducibility.
 
         Returns:
-            dict with keys:
-                "gaussians": Gaussian splat object with xyz, opacity,
-                             scaling, rotation, and features.
-                "rotation": (4,) quaternion for object orientation.
-                "translation": (3,) position in world frame.
-                "scale": (3,) scale factors.
+            (3, H, W) float32 tensor of XYZ coordinates in camera space.
         """
-        import numpy as np
-
-        # Convert to RGBA uint8 numpy array (SAM 3D's expected input format)
-        img_np = (image.cpu().numpy() * 255).astype(np.uint8)
-        mask_np = (mask.cpu().numpy() * 255).astype(np.uint8)
-        rgba = np.concatenate(
-            [img_np[..., :3], mask_np[..., None]], axis=-1
-        )  # (H, W, 4)
-
-        # Run pipeline using the .run() API (matches notebook/inference.py)
-        output = self.pipeline.run(
-            rgba,
-            None,  # masks — handled internally
-            seed,
-            stage1_only=False,
-            with_mesh_postprocess=False,
-            with_texture_baking=False,
-            with_layout_postprocess=False,
-            use_vertex_color=True,
-            stage1_inference_steps=self.num_inference_steps,
-            stage2_inference_steps=self.num_inference_steps,
-            decode_formats=["gaussian"],
-        )
-
-        # Extract Gaussian geometry from pipeline output
-        gs = output.get("gs")
-        if gs is None:
-            gs = output.get("gaussian")
-            if isinstance(gs, list) and len(gs) > 0:
-                gs = gs[0]
-
-        # Layout info (rotation, translation, scale) is in the output
-        # directly or nested under a "layout" key
-        layout = output.get("layout", {})
-
-        def _pick(key):
-            v = output.get(key)
-            return v if v is not None else layout.get(key)
-
-        result = {
-            "gaussians": gs,
-            "rotation": _pick("rotation"),
-            "translation": _pick("translation"),
-            "scale": _pick("scale"),
-        }
-
-        return result
+        rgba = self._to_rgba(image, mask)
+        pointmap_dict = self.pipeline.compute_pointmap(rgba)
+        return pointmap_dict["pointmap"]  # (3, H, W)

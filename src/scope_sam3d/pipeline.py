@@ -1,8 +1,9 @@
 """SAM 3D Depth pipeline — extracts depth and normal maps from video frames.
 
-Takes a single video frame, runs it through Meta's SAM 3D Objects
-geometry model, and renders the resulting Gaussian geometry as a depth
-map, surface normal map, or both side-by-side.
+Uses MoGe (monocular geometry estimator) from Meta's SAM 3D Objects to
+produce a 3D pointmap from a single frame, then derives depth and normal
+maps from that pointmap. This bypasses the expensive diffusion stages
+entirely; only a single forward pass through MoGe is needed.
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ import torch
 from scope.core.pipelines.interface import Pipeline, Requirements
 
 from .model_loader import load_sam3d_pipeline
-from .renderers.depth import render_depth_map
-from .renderers.normals import render_normal_map
+from .renderers.depth import render_depth_from_pointmap
+from .renderers.normals import render_normals_from_pointmap
 from .schema import SAM3DConfig
 
 if TYPE_CHECKING:
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 
 class SAM3DPipeline(Pipeline):
-    """Extract depth and normal maps using SAM 3D's geometry model."""
+    """Extract depth and normal maps using SAM 3D's MoGe depth model."""
 
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
@@ -53,10 +54,11 @@ class SAM3DPipeline(Pipeline):
         return Requirements(input_size=1)
 
     def __call__(self, **kwargs) -> dict:
-        """Process a single video frame through SAM 3D geometry.
+        """Process a single video frame through MoGe depth estimation.
 
-        Accepts the frame, runs the geometry model, and renders the
-        requested output (depth map, normal map, or both).
+        Runs MoGe to produce a 3D pointmap (single forward pass), then
+        derives depth and/or normal maps from spatial operations on that
+        pointmap. No diffusion stages are executed.
         """
         video = kwargs.get("video")
         if video is None:
@@ -87,24 +89,15 @@ class SAM3DPipeline(Pipeline):
         rH, rW = frame_resized.shape[:2]
         mask = torch.ones(rH, rW, device=self.device, dtype=torch.float32)
 
-        # Run SAM 3D geometry model
-        with torch.no_grad():
-            geo_output = self.model(frame_resized, mask)
-
-        gaussians = geo_output["gaussians"]
-        layout = {
-            "rotation": geo_output.get("rotation"),
-            "translation": geo_output.get("translation"),
-            "scale": geo_output.get("scale"),
-        }
+        # Fast path: single MoGe forward pass -> (3, H, W) pointmap
+        pointmap = self.model.compute_pointmap(frame_resized, mask)
 
         # Render requested output at original resolution
         result = None
 
         if output_mode in ("depth", "both"):
-            depth = render_depth_map(
-                gaussians=gaussians,
-                layout=layout,
+            depth = render_depth_from_pointmap(
+                pointmap=pointmap,
                 output_size=(H, W),
                 device=self.device,
                 colormap=depth_colormap,
@@ -112,9 +105,8 @@ class SAM3DPipeline(Pipeline):
             )
 
         if output_mode in ("normals", "both"):
-            normals = render_normal_map(
-                gaussians=gaussians,
-                layout=layout,
+            normals = render_normals_from_pointmap(
+                pointmap=pointmap,
                 output_size=(H, W),
                 device=self.device,
                 space=normal_space,

@@ -182,6 +182,76 @@ def render_normal_map(
     return normal_map.clamp(0, 1)
 
 
+def render_normals_from_pointmap(
+    pointmap: torch.Tensor,
+    output_size: tuple[int, int],
+    device: torch.device,
+    space: str = "camera",
+) -> torch.Tensor:
+    """Render a normal map from spatial gradients of a 3D pointmap.
+
+    Computes normals as the cross product of horizontal and vertical
+    gradients in the XYZ pointmap. Much faster than PCA-based estimation
+    from Gaussian point clouds.
+
+    Args:
+        pointmap: (3, H, W) XYZ coordinates in camera space.
+        output_size: (H, W) to resize the output to.
+        device: Torch device.
+        space: "camera" (default). Unused here since the pointmap is
+               already in camera space, but kept for API compatibility.
+
+    Returns:
+        (H, W, 3) float32 tensor in [0, 1] range encoding normals.
+        RGB = (nx+1)/2, (ny+1)/2, (nz+1)/2.
+    """
+    pm = pointmap.to(device)  # (3, H_pm, W_pm)
+
+    # Spatial gradients: dx along width, dy along height
+    # pointmap shape is (3, H, W), so dim=2 is width, dim=1 is height
+    dx = pm[:, :, 1:] - pm[:, :, :-1]  # (3, H, W-1)
+    dy = pm[:, 1:, :] - pm[:, :-1, :]  # (3, H-1, W)
+
+    # Trim to common size: (3, H-1, W-1)
+    dx = dx[:, :-1, :]  # (3, H-1, W-1)
+    dy = dy[:, :, :-1]  # (3, H-1, W-1)
+
+    # Cross product: normal = dy × dx (right-hand rule, camera-facing)
+    # Permute to (H-1, W-1, 3) for the cross product
+    dx_hwc = dx.permute(1, 2, 0)  # (H-1, W-1, 3)
+    dy_hwc = dy.permute(1, 2, 0)  # (H-1, W-1, 3)
+
+    normals = torch.cross(dy_hwc, dx_hwc, dim=-1)  # (H-1, W-1, 3)
+
+    # Normalize to unit length
+    norms = normals.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+    normals = normals / norms
+
+    # Orient normals toward camera (negative z in camera space)
+    # Flip normals that point away from camera
+    flip = (normals[..., 2] > 0).float() * -2.0 + 1.0
+    normals = normals * flip.unsqueeze(-1)
+
+    # Resize to target resolution
+    H, W = output_size
+    if normals.shape[0] != H or normals.shape[1] != W:
+        # Interpolate in CHW format
+        normals_chw = normals.permute(2, 0, 1).unsqueeze(0)  # (1, 3, H-1, W-1)
+        normals_chw = torch.nn.functional.interpolate(
+            normals_chw, size=(H, W), mode="bilinear", align_corners=False
+        )
+        normals = normals_chw.squeeze(0).permute(1, 2, 0)  # (H, W, 3)
+
+        # Re-normalize after interpolation
+        norms = normals.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        normals = normals / norms
+
+    # Map from [-1, 1] to [0, 1] for display
+    normal_map = (normals + 1.0) * 0.5
+
+    return normal_map.clamp(0, 1)
+
+
 def _fill_normal_holes(
     normals: torch.Tensor, valid: torch.Tensor, iterations: int = 5
 ) -> torch.Tensor:
